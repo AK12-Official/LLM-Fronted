@@ -81,10 +81,11 @@
             <div class="upload-controls">
               <input type="file" ref="fileInput" accept="image/*,video/*" style="display: none"
                 @change="handleFileUpload" />
-              <div style="display: flex; gap: 12px; align-items: center;">
-                <input v-model="imageUrl" placeholder="或输入图片/视频URL..." class="url-input" style="flex: 1;"
-                  @keydown.enter.prevent="loadFromUrl" />
-                <button @click="detect" class="detect-btn" style="white-space: nowrap;">
+              <div class="upload-buttons">
+                <button @click="uploadImageOrVideo" class="upload-btn">
+                  🖼️ 上传图片/视频
+                </button>
+                <button @click="detect" class="detect-btn">
                   立即检测
                 </button>
               </div>
@@ -192,8 +193,6 @@
 import { ref, nextTick } from 'vue';
 
 const activeTab = ref('text');
-const imageUrl = ref('');
-// 移除：const audioUrl = ref('');
 const currentAudio = ref('');
 const currentAudioName = ref('');
 const currentImageOrVideo = ref('');
@@ -217,12 +216,12 @@ interface Message {
 
 const messages = ref<Message[]>([]);
 
-// 新增：判断文件是否为图片
+// 判断文件是否为图片
 function isImage(url: string): boolean {
   return /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(url) || url.startsWith('data:image/');
 }
 
-// 新增：判断文件是否为视频
+// 判断文件是否为视频
 function isVideo(url: string): boolean {
   return /\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i.test(url) || url.startsWith('data:video/');
 }
@@ -245,7 +244,7 @@ function scrollToBottom() {
   });
 }
 
-// 发送消息 - 修改：只在首次检测前禁用
+// 发送消息 - 只在首次检测前禁用
 function sendMessage() {
   if (!inputMessage.value.trim()) return;
 
@@ -278,7 +277,7 @@ function sendMessage() {
   scrollToBottom();
 }
 
-// 检测函数 - 修改：移除音频URL检查
+// 检测函数
 function detect() {
   let content = '';
 
@@ -289,15 +288,14 @@ function detect() {
     }
     content = `检测文本内容：${textContent.value.substring(0, 50)}${textContent.value.length > 50 ? '...' : ''}`;
   } else if (activeTab.value === 'imageAndVideo') {
-    if (!currentImageOrVideo.value && !imageUrl.value.trim()) {
-      alert('请先上传图片/视频或输入URL');
+    if (!currentImageOrVideo.value) {
+      alert('请先上传图片/视频');
       return;
     }
-    const fileSource = currentFileName.value || imageUrl.value;
-    const fileType = isImage(currentImageOrVideo.value || imageUrl.value) ? '图片' : '视频';
+    const fileSource = currentFileName.value;
+    const fileType = isImage(currentImageOrVideo.value) ? '图片' : '视频';
     content = `检测${fileType}：${fileSource}`;
   } else if (activeTab.value === 'audio') {
-    // 修改：只检查上传的音频文件
     if (!currentAudio.value) {
       alert('请先上传音频文件');
       return;
@@ -323,7 +321,7 @@ function detect() {
     if (activeTab.value === 'text') {
       detectType = '文本';
     } else if (activeTab.value === 'imageAndVideo') {
-      detectType = isImage(currentImageOrVideo.value || imageUrl.value) ? '图片' : '视频';
+      detectType = isImage(currentImageOrVideo.value) ? '图片' : '视频';
     } else if (activeTab.value === 'audio') {
       detectType = '音频';
     }
@@ -375,19 +373,6 @@ function handleFileUpload(event: Event) {
 
     // 清空文件输入，允许重复选择同一文件
     target.value = '';
-  }
-}
-
-// 修改：从URL加载图片/视频
-function loadFromUrl() {
-  if (imageUrl.value.trim()) {
-    // 设置为主显示图片/视频
-    currentImageOrVideo.value = imageUrl.value;
-    currentFileName.value = imageUrl.value.split('/').pop() || 'URL文件';
-
-    console.log('从URL加载成功:', imageUrl.value);
-    // 清空URL输入框
-    imageUrl.value = '';
   }
 }
 
@@ -747,9 +732,6 @@ function uploadAudioFile() {
 }
 
 .upload-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
   margin-top: auto;
 }
 
@@ -1075,24 +1057,5 @@ function uploadAudioFile() {
   font-size: 14px;
   color: #374151;
   font-weight: 500;
-}
-
-.url-input {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 14px;
-  outline: none;
-  font-family: inherit;
-}
-
-.url-input:focus {
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.1);
-}
-
-.url-input::placeholder {
-  color: #9ca3af;
 }
 </style>
