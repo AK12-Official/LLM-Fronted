@@ -34,10 +34,13 @@
               @click="activeTab = 'imageAndVideo'">
               🖼️ 图片/视频
             </button>
+            <button :class="['tab-btn', { active: activeTab === 'audio' }]" @click="activeTab = 'audio'">
+              🎵 音频
+            </button>
           </div>
 
           <p class="description">
-            辅助大模型系统
+            AI检测系统
           </p>
         </div>
 
@@ -50,7 +53,8 @@
               </div>
 
               <div class="text-upload-controls">
-                <input type="file" ref="textFileInput" accept=".txt,.doc,.docx" style="display: none" />
+                <input type="file" ref="textFileInput" accept=".txt,.text,text/plain" style="display: none"
+                  @change="handleTextFileUpload" />
                 <div class="upload-buttons">
                   <button @click="uploadTextFile" class="upload-btn">
                     📄 上传文本文件
@@ -66,25 +70,57 @@
           <!-- 图片/视频上传区 -->
           <div v-else-if="activeTab === 'imageAndVideo'" class="image-display">
             <div class="main-image" @click="uploadImageOrVideo">
-              <div class="image-overlay">
-                <span class="image-label">点击上传图片</span>
-              </div>
-            </div>
-
-            <div class="thumbnail-list">
-              <div v-for="(thumb, index) in thumbnails" :key="index" :class="['thumbnail']">
-                <img :src="thumb" :alt="`缩略图${index + 1}`" />
+              <img v-if="currentImageOrVideo && isImage(currentImageOrVideo)" :src="currentImageOrVideo" alt="上传的图片" />
+              <video v-else-if="currentImageOrVideo && isVideo(currentImageOrVideo)" :src="currentImageOrVideo" controls
+                class="video-element"></video>
+              <div v-else class="image-overlay">
+                <span class="image-label">点击上传图片或视频</span>
               </div>
             </div>
 
             <div class="upload-controls">
-              <input type="file" ref="fileInput" accept="image/*,video/*" style="display: none" />
+              <input type="file" ref="fileInput" accept="image/*,video/*" style="display: none"
+                @change="handleFileUpload" />
               <div style="display: flex; gap: 12px; align-items: center;">
-                <input v-model="imageUrl" placeholder="http://php-xgwg/wp-content/cache/all/" class="url-input"
-                  style="flex: 1;" />
+                <input v-model="imageUrl" placeholder="或输入图片/视频URL..." class="url-input" style="flex: 1;"
+                  @keydown.enter.prevent="loadFromUrl" />
                 <button @click="detect" class="detect-btn" style="white-space: nowrap;">
                   立即检测
                 </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 音频上传区 -->
+          <div v-else-if="activeTab === 'audio'" class="audio-display">
+            <div class="audio-upload-area">
+              <div class="audio-upload-section">
+                <div v-if="!currentAudio" class="audio-drop-zone" @click="uploadAudioFile">
+                  <div class="audio-icon">🎵</div>
+                  <div class="audio-text">点击上传音频文件</div>
+                  <div class="audio-formats">支持 MP3, WAV, M4A, AAC 格式</div>
+                </div>
+
+                <!-- 音频播放器 -->
+                <div v-if="currentAudio" class="audio-player">
+                  <audio :src="currentAudio" controls class="audio-element"></audio>
+                  <div class="audio-info">
+                    <span class="audio-name">{{ currentAudioName }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="audio-upload-controls">
+                <input type="file" ref="audioFileInput" accept=".mp3,.wav,.m4a,.aac,audio/*" style="display: none"
+                  @change="handleAudioFileUpload" />
+                <div class="upload-buttons">
+                  <button @click="uploadAudioFile" class="upload-btn">
+                    🎵 上传音频文件
+                  </button>
+                  <button @click="detect" class="detect-btn">
+                    立即检测
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -157,12 +193,20 @@ import { ref, nextTick } from 'vue';
 
 const activeTab = ref('text');
 const imageUrl = ref('');
+// 移除：const audioUrl = ref('');
+const currentAudio = ref('');
+const currentAudioName = ref('');
+const currentImageOrVideo = ref('');
+const currentFileName = ref('');
 const textContent = ref('');
 const inputMessage = ref('');
 const chatMessages = ref<HTMLElement>();
-const isDetectionComplete = ref(false); // 检测是否完成的状态
-const isDetecting = ref(false); // 是否正在检测中
-const hasDetectedOnce = ref(false); // 新增：是否已经检测过一次
+const audioFileInput = ref<HTMLInputElement>();
+const textFileInput = ref<HTMLInputElement>();
+const fileInput = ref<HTMLInputElement>();
+const isDetectionComplete = ref(false);
+const isDetecting = ref(false);
+const hasDetectedOnce = ref(false);
 
 // 消息类型定义
 interface Message {
@@ -173,10 +217,15 @@ interface Message {
 
 const messages = ref<Message[]>([]);
 
-const imgurl = 'https://ts1.tc.mm.bing.net/th/id/R-C.dadd2b0bbd26056749d0340552be7678?rik=be%2fKyUTFnEy%2bng&riu=http%3a%2f%2fn.sinaimg.cn%2ftranslate%2f20170319%2f3rWp-fycnyhk9610873.jpg&ehk=OfCvVf3hPtcdeGPkTgOafi1OXw%2fqJKk8ShcejPzFPl0%3d&risl=&pid=ImgRaw&r=0';
-const thumbnails = ref([
-  imgurl, imgurl, imgurl, imgurl, imgurl, imgurl
-]);
+// 新增：判断文件是否为图片
+function isImage(url: string): boolean {
+  return /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(url) || url.startsWith('data:image/');
+}
+
+// 新增：判断文件是否为视频
+function isVideo(url: string): boolean {
+  return /\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i.test(url) || url.startsWith('data:video/');
+}
 
 // 格式化时间
 function formatTime() {
@@ -229,7 +278,7 @@ function sendMessage() {
   scrollToBottom();
 }
 
-// 检测函数 - 修改：首次检测后永久启用对话框
+// 检测函数 - 修改：移除音频URL检查
 function detect() {
   let content = '';
 
@@ -239,12 +288,21 @@ function detect() {
       return;
     }
     content = `检测文本内容：${textContent.value.substring(0, 50)}${textContent.value.length > 50 ? '...' : ''}`;
-  } else {
-    if (!imageUrl.value.trim()) {
-      alert('请先上传图片或输入图片URL');
+  } else if (activeTab.value === 'imageAndVideo') {
+    if (!currentImageOrVideo.value && !imageUrl.value.trim()) {
+      alert('请先上传图片/视频或输入URL');
       return;
     }
-    content = `检测图片：${imageUrl.value}`;
+    const fileSource = currentFileName.value || imageUrl.value;
+    const fileType = isImage(currentImageOrVideo.value || imageUrl.value) ? '图片' : '视频';
+    content = `检测${fileType}：${fileSource}`;
+  } else if (activeTab.value === 'audio') {
+    // 修改：只检查上传的音频文件
+    if (!currentAudio.value) {
+      alert('请先上传音频文件');
+      return;
+    }
+    content = `检测音频：${currentAudioName.value}`;
   }
 
   // 设置检测中状态（但不影响已启用的对话框）
@@ -260,10 +318,19 @@ function detect() {
   // 模拟检测结果
   setTimeout(() => {
     const isFirstDetection = !hasDetectedOnce.value;
+    let detectType = '';
+
+    if (activeTab.value === 'text') {
+      detectType = '文本';
+    } else if (activeTab.value === 'imageAndVideo') {
+      detectType = isImage(currentImageOrVideo.value || imageUrl.value) ? '图片' : '视频';
+    } else if (activeTab.value === 'audio') {
+      detectType = '音频';
+    }
 
     messages.value.push({
       type: 'assistant',
-      content: `检测完成！${activeTab.value === 'text' ? '文本' : '图片'}内容分析结果：这是一个模拟的检测结果，实际项目中会返回真实的分析数据。${isFirstDetection ? '现在您可以在下方输入框中提问相关问题了。' : ''}`,
+      content: `检测完成！${detectType}内容分析结果：这是一个模拟的检测结果，实际项目中会返回真实的分析数据。${isFirstDetection ? '现在您可以在下方输入框中提问相关问题了。' : ''}`,
       time: formatTime()
     });
 
@@ -280,12 +347,117 @@ function detect() {
   scrollToBottom();
 }
 
-function uploadTextFile() {
-  alert('上传文本功能待实现');
+// 修改：实现图片/视频上传功能
+function uploadImageOrVideo() {
+  fileInput.value?.click();
 }
 
-function uploadImageOrVideo() {
-  alert('上传图片、视频功能待实现');
+// 修改：处理图片/视频文件上传
+function handleFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+
+  if (file) {
+    // 检查文件类型
+    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      // 创建预览URL
+      const previewUrl = URL.createObjectURL(file);
+
+      // 直接设置为主显示图片/视频
+      currentImageOrVideo.value = previewUrl;
+      currentFileName.value = file.name;
+
+      console.log('文件上传成功:', file.name);
+      alert(`文件 "${file.name}" 上传成功！`);
+    } else {
+      alert('请选择图片或视频文件！');
+    }
+
+    // 清空文件输入，允许重复选择同一文件
+    target.value = '';
+  }
+}
+
+// 修改：从URL加载图片/视频
+function loadFromUrl() {
+  if (imageUrl.value.trim()) {
+    // 设置为主显示图片/视频
+    currentImageOrVideo.value = imageUrl.value;
+    currentFileName.value = imageUrl.value.split('/').pop() || 'URL文件';
+
+    console.log('从URL加载成功:', imageUrl.value);
+    // 清空URL输入框
+    imageUrl.value = '';
+  }
+}
+
+// 新增：处理音频文件上传
+function handleAudioFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+
+  if (file) {
+    // 检查文件类型
+    if (file.type.startsWith('audio/')) {
+      // 创建音频URL
+      const audioURL = URL.createObjectURL(file);
+      currentAudio.value = audioURL;
+      currentAudioName.value = file.name;
+
+      console.log('音频文件上传成功:', file.name);
+      alert(`音频文件 "${file.name}" 上传成功！`);
+    } else {
+      alert('请选择音频文件！');
+    }
+  }
+}
+
+// 修改：实现文本文件上传功能
+function uploadTextFile() {
+  textFileInput.value?.click();
+}
+
+// 增强版文本文件处理（可选）
+function handleTextFileUpload(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+
+  if (file) {
+    const fileExtension = file.name.split('.').pop()?.toLowerCase();
+
+    if (file.type === 'text/plain' || fileExtension === 'txt') {
+      // 处理纯文本文件
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        textContent.value = content;
+        console.log('文本文件上传成功:', file.name);
+        alert(`文本文件 "${file.name}" 上传成功！共 ${content.length} 个字符`);
+      };
+
+      reader.onerror = () => {
+        console.error('文件读取失败');
+        alert('文件读取失败，请重试！');
+      };
+
+      // 读取文件内容，尝试自动检测编码
+      reader.readAsText(file, 'UTF-8');
+
+    } else if (fileExtension === 'doc' || fileExtension === 'docx') {
+      // Word 文档需要特殊处理（可选功能）
+      alert('Word 文档支持功能正在开发中，请先将内容复制粘贴到文本框中，或保存为 .txt 格式后上传。');
+    } else {
+      alert('请选择支持的文件格式：.txt 文本文件');
+    }
+
+    // 清空文件输入，允许重复选择同一文件
+    target.value = '';
+  }
+}
+
+function uploadAudioFile() {
+  audioFileInput.value?.click();
 }
 </script>
 
@@ -376,16 +548,19 @@ function uploadImageOrVideo() {
   display: flex;
   justify-content: center;
   margin-bottom: 24px;
+  gap: 0;
 }
 
 .tab-btn {
-  padding: 12px 24px;
+  padding: 12px 20px;
+  /* 减少padding以适应三个按钮 */
   border: none;
   background: rgba(255, 255, 255, 0.1);
   color: white;
   cursor: pointer;
   transition: all 0.2s;
-  font-size: 16px;
+  font-size: 14px;
+  /* 减小字体 */
 }
 
 .tab-btn:first-child {
@@ -396,8 +571,16 @@ function uploadImageOrVideo() {
   border-radius: 0 8px 8px 0;
 }
 
+.tab-btn:not(:first-child):not(:last-child) {
+  border-radius: 0;
+}
+
 .tab-btn.active {
   background: #8b5cf6;
+}
+
+.tab-btn:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .description {
@@ -502,20 +685,49 @@ function uploadImageOrVideo() {
 .main-image {
   position: relative;
   width: 100%;
-  height: 72.5%;
+  height: 85%;
   border: 2px dashed #d1d5db;
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 16px;
   flex-shrink: 0;
+  background: #f9fafb;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.main-image img {
+.main-image img,
+.main-image video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  display: block;
 }
 
+/* 有内容时改变边框样式 */
+.main-image:has(img),
+.main-image:has(video) {
+  border-style: solid;
+  border-color: #e5e7eb;
+  cursor: default;
+}
+
+/* 点击区域提示 */
+.main-image:not(:has(img)):not(:has(video)):hover {
+  border-color: #8b5cf6;
+  background: #f3f4f6;
+}
+
+/* 视频播放器样式 */
+.video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* 改进图片覆盖层 */
 .image-overlay {
   position: absolute;
   top: 50%;
@@ -523,36 +735,15 @@ function uploadImageOrVideo() {
   transform: translate(-50%, -50%);
   background: rgba(0, 0, 0, 0.7);
   color: white;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 16px 24px;
+  border-radius: 8px;
   pointer-events: none;
+  text-align: center;
 }
 
-.thumbnail-list {
-  display: grid;
-  grid-template-columns: repeat(8, 1fr);
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.thumbnail {
-  width: 50px;
-  height: 50px;
-  border-radius: 6px;
-  overflow: hidden;
-  cursor: pointer;
-  border: 2px solid transparent;
-  transition: border-color 0.2s;
-}
-
-.thumbnail.active {
-  border-color: #8b5cf6;
-}
-
-.thumbnail img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.image-label {
+  font-size: 16px;
+  font-weight: 500;
 }
 
 .upload-controls {
@@ -560,18 +751,6 @@ function uploadImageOrVideo() {
   flex-direction: column;
   gap: 12px;
   margin-top: auto;
-}
-
-.url-input {
-  padding: 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 14px;
-  outline: none;
-}
-
-.url-input:focus {
-  border-color: #8b5cf6;
 }
 
 /* 对话面板样式 */
@@ -806,5 +985,114 @@ function uploadImageOrVideo() {
 
 .chat-messages::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* 音频上传区样式 - 修改为与其他区域一致 */
+.audio-display {
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.audio-upload-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.audio-upload-section {
+  flex: 1;
+}
+
+.audio-drop-zone {
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  border: 2px dashed #d1d5db;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.audio-drop-zone:hover {
+  border-color: #8b5cf6;
+  background: #f8fafc;
+}
+
+.audio-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.6;
+}
+
+.audio-text {
+  font-size: 16px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.audio-formats {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.audio-player {
+  background: #f9fafb;
+  border-radius: 8px;
+  padding: 16px;
+  border: 1px solid #e5e7eb;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.audio-element {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.audio-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.audio-name {
+  font-size: 14px;
+  color: #374151;
+  font-weight: 500;
+}
+
+.url-input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 14px;
+  outline: none;
+  font-family: inherit;
+}
+
+.url-input:focus {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.1);
+}
+
+.url-input::placeholder {
+  color: #9ca3af;
 }
 </style>
