@@ -69,10 +69,11 @@
 
           <!-- 图片/视频上传区 -->
           <div v-else-if="activeTab === 'imageAndVideo'" class="image-display">
-            <div class="main-image" @click="uploadImageOrVideo">
-              <img v-if="currentImageOrVideo && isImage(currentImageOrVideo)" :src="currentImageOrVideo" alt="上传的图片" />
+            <div class="main-image" @click="!currentImageOrVideo ? uploadImageOrVideo() : null">
+              <img v-if="currentImageOrVideo && isImage(currentImageOrVideo)" :src="currentImageOrVideo" alt="上传的图片"
+                @load="console.log('图片加载成功')" @error="console.log('图片加载失败')" />
               <video v-else-if="currentImageOrVideo && isVideo(currentImageOrVideo)" :src="currentImageOrVideo" controls
-                class="video-element"></video>
+                class="video-element" @loadeddata="console.log('视频加载成功')" @error="console.log('视频加载失败')"></video>
               <div v-else class="image-overlay">
                 <span class="image-label">点击上传图片或视频</span>
               </div>
@@ -216,13 +217,20 @@ interface Message {
 
 const messages = ref<Message[]>([]);
 
-// 判断文件是否为图片
+// 修复判断函数，处理blob URL
 function isImage(url: string): boolean {
+  if (url.startsWith('blob:')) {
+    // 对于blob URL，我们需要通过文件名来判断
+    return /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(currentFileName.value);
+  }
   return /\.(jpg|jpeg|png|gif|bmp|webp)$/i.test(url) || url.startsWith('data:image/');
 }
 
-// 判断文件是否为视频
 function isVideo(url: string): boolean {
+  if (url.startsWith('blob:')) {
+    // 对于blob URL，我们需要通过文件名来判断
+    return /\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i.test(currentFileName.value);
+  }
   return /\.(mp4|avi|mov|wmv|flv|webm|mkv)$/i.test(url) || url.startsWith('data:video/');
 }
 
@@ -356,16 +364,28 @@ function handleFileUpload(event: Event) {
   const file = target.files?.[0];
 
   if (file) {
+    console.log('选中的文件:', file.name, file.type, file.size);
+
     // 检查文件类型
     if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      // 释放之前的URL以避免内存泄漏
+      if (currentImageOrVideo.value && currentImageOrVideo.value.startsWith('blob:')) {
+        URL.revokeObjectURL(currentImageOrVideo.value);
+      }
+
       // 创建预览URL
       const previewUrl = URL.createObjectURL(file);
 
-      // 直接设置为主显示图片/视频
+      // 设置预览数据
       currentImageOrVideo.value = previewUrl;
       currentFileName.value = file.name;
 
       console.log('文件上传成功:', file.name);
+      console.log('预览URL:', previewUrl);
+      console.log('当前值:', currentImageOrVideo.value);
+      console.log('isImage结果:', isImage(previewUrl));
+      console.log('isVideo结果:', isVideo(previewUrl));
+
       alert(`文件 "${file.name}" 上传成功！`);
     } else {
       alert('请选择图片或视频文件！');
@@ -670,7 +690,12 @@ function uploadAudioFile() {
 .main-image {
   position: relative;
   width: 100%;
-  height: 85%;
+  height: 400px;
+  /* 固定高度，不使用百分比 */
+  min-height: 400px;
+  /* 最小高度 */
+  max-height: 400px;
+  /* 最大高度 */
   border: 2px dashed #d1d5db;
   border-radius: 8px;
   overflow: hidden;
@@ -688,10 +713,13 @@ function uploadAudioFile() {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* 保持宽高比，完整显示内容 */
   display: block;
+  max-width: 100%;
+  max-height: 100%;
 }
 
-/* 有内容时改变边框样式 */
+/* 当有内容时，移除虚线边框并改为实线 */
 .main-image:has(img),
 .main-image:has(video) {
   border-style: solid;
@@ -699,10 +727,11 @@ function uploadAudioFile() {
   cursor: default;
 }
 
-/* 点击区域提示 */
-.main-image:not(:has(img)):not(:has(video)):hover {
-  border-color: #8b5cf6;
-  background: #f3f4f6;
+/* 如果浏览器不支持:has()选择器，使用备用方案 */
+.main-image.has-content {
+  border-style: solid;
+  border-color: #e5e7eb;
+  cursor: default;
 }
 
 /* 视频播放器样式 */
@@ -710,6 +739,8 @@ function uploadAudioFile() {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
 }
 
 /* 改进图片覆盖层 */
